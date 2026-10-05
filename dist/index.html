@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#07110e" />
+  <title>Kadro Arena — Halı Saha Kadro Yönetimi</title>
+  <meta name="description" content="Oyuncularını yönet, sahaya sürükle ve dengeli halı saha takımları oluştur." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="topbar">
+    <button class="brand" id="homeBtn" aria-label="Kadro ekranı">
+      <span class="brand-mark"><i></i><i></i><i></i></span>
+      <span><b>KADRO</b><em>ARENA</em></span>
+    </button>
+    <nav class="nav-tabs" aria-label="Ana menü">
+      <button class="nav-tab active" data-view="squad"><span>⌁</span> Kadro</button>
+      <button class="nav-tab" data-view="players"><span>♙</span> Oyuncular</button>
+      <button class="nav-tab" data-view="matches"><span>◷</span> Maçlar</button>
+    </nav>
+    <button class="profile-pill" aria-label="Profil"><span>KA</span><i></i></button>
+  </header>
+
+  <main>
+    <section class="view active" id="squadView">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">HAFTALIK KADRO</p>
+          <h1 id="matchTitle">Çarşamba Halı Saha</h1>
+          <button class="date-button" id="editMatchBtn"><span id="matchDateLabel"></span> <b>✎</b></button>
+        </div>
+        <div class="match-actions">
+          <button class="btn ghost" id="newMatchBtn">＋ Yeni hafta</button>
+          <button class="btn primary" id="balanceBtn"><span>⚡</span> Dengeli takımları oluştur</button>
+        </div>
+      </div>
+
+      <div class="control-strip">
+        <label><span>MAÇ FORMATI</span><select id="formatSelect"><option value="6">6'ya 6</option><option value="7">7'ye 7</option><option value="8">8'e 8</option></select></label>
+        <label><span>A TAKIMI DİZİLİMİ</span><select id="formationA"></select></label>
+        <label><span>B TAKIMI DİZİLİMİ</span><select id="formationB"></select></label>
+        <div class="strip-note"><span>i</span> Kartları tutup sahaya sürükle. Mobilde karta, sonra slota dokun.</div>
+      </div>
+
+      <div class="teams-summary" id="teamsSummary"></div>
+
+      <div class="pitch-grid">
+        <article class="team-panel team-a">
+          <div class="team-title"><div><span>A</span><b>TAKIM A</b></div><div class="team-mini" id="teamMiniA"></div></div>
+          <div class="pitch" id="pitchA" data-team="A"><div class="pitch-lines"><i></i><i></i><i></i></div><div class="slots" id="slotsA"></div></div>
+        </article>
+        <div class="versus"><span>VS</span></div>
+        <article class="team-panel team-b">
+          <div class="team-title"><div><span>B</span><b>TAKIM B</b></div><div class="team-mini" id="teamMiniB"></div></div>
+          <div class="pitch" id="pitchB" data-team="B"><div class="pitch-lines"><i></i><i></i><i></i></div><div class="slots" id="slotsB"></div></div>
+        </article>
+      </div>
+
+      <section class="roster-section">
+        <div class="roster-head">
+          <div>
+            <p class="eyebrow">OYUNCU YÖNETİMİ</p>
+            <h2>Haftalık oyuncu havuzu</h2>
+          </div>
+          <div class="segmented" id="poolTabs">
+            <button data-pool="bench" class="active">Oyuncu havuzu <b id="benchCount">0</b></button>
+            <button data-pool="out">Kadro dışı <b id="outCount">0</b></button>
+            <button data-pool="all">Tüm oyuncular <b id="allCount">0</b></button>
+          </div>
+        </div>
+        <div class="pool-drop active" id="poolDrop" data-zone="bench"><div class="pool-cards" id="poolCards"></div></div>
+      </section>
+    </section>
+
+    <section class="view" id="playersView">
+      <div class="page-head">
+        <div><p class="eyebrow">KULÜP</p><h1>Oyuncular</h1><p class="subcopy">Arkadaşlarının kartlarını, mevkilerini ve puanlarını yönet.</p></div>
+        <button class="btn primary" id="addPlayerBtn">＋ Yeni oyuncu</button>
+      </div>
+      <div class="player-toolbar"><div class="searchbox">⌕ <input id="playerSearch" placeholder="Oyuncu ara..." /></div><select id="positionFilter"><option value="all">Tüm mevkiler</option><option>KL</option><option>DF</option><option>OS</option><option>FV</option></select></div>
+      <div class="player-gallery" id="playerGallery"></div>
+    </section>
+
+    <section class="view" id="matchesView">
+      <div class="page-head"><div><p class="eyebrow">ARŞİV</p><h1>Kayıtlı maçlar</h1><p class="subcopy">Geçmiş kadroları aç, düzenle veya yeni haftaya kopyala.</p></div><button class="btn primary" id="newMatchBtn2">＋ Yeni maç</button></div>
+      <div class="matches-list" id="matchesList"></div>
+    </section>
+  </main>
+
+  <dialog id="playerDialog" class="modal player-modal">
+    <form method="dialog" id="playerForm">
+      <div class="modal-head"><div><p class="eyebrow">OYUNCU PROFİLİ</p><h2 id="playerModalTitle">Yeni oyuncu</h2></div><button value="cancel" class="icon-btn" aria-label="Kapat">×</button></div>
+      <div class="editor-layout">
+        <div class="card-preview-wrap"><div id="cardPreview"></div><label class="upload-btn">▣ Fotoğraf yükle<input type="file" id="photoInput" accept="image/*" hidden></label><p>JPG veya PNG · Görsel cihazında saklanır</p><div class="photo-controls"><label>Yatay <input type="range" id="photoX" min="0" max="100" value="50"></label><label>Dikey <input type="range" id="photoY" min="0" max="100" value="50"></label><label>Yakınlık <input type="range" id="photoScale" min="100" max="180" value="110"></label></div></div>
+        <div class="editor-fields">
+          <div class="field-row"><label>Ad soyad<input required id="pName" maxlength="40"></label><label>Kısa isim / lakap<input required id="pNick" maxlength="14"></label></div>
+          <div class="field-row"><label>Ana mevki<select id="pPosition"><option>KL</option><option>DF</option><option>OS</option><option>FV</option></select></label><label>Alternatif mevkiler<input id="pAlt" placeholder="Örn: OS, FV"></label></div>
+          <div class="formula-callout"><span id="formulaIcon">∑</span><div><b>Overall otomatik hesaplanır</b><small id="formulaText"></small></div><strong id="liveOverall">0</strong></div>
+          <h3>Saha yetenekleri</h3><div class="stats-editor" id="fieldStats"></div>
+          <div id="keeperBlock"><h3>Kaleci yetenekleri</h3><div class="stats-editor" id="keeperStats"></div></div>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn danger" id="deletePlayerBtn">Oyuncuyu sil</button><span></span><button value="cancel" class="btn ghost">Vazgeç</button><button type="submit" class="btn primary">Kartı kaydet</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="matchDialog" class="modal small-modal">
+    <form method="dialog" id="matchForm"><div class="modal-head"><div><p class="eyebrow">MAÇ BİLGİLERİ</p><h2 id="matchModalTitle">Yeni hafta</h2></div><button value="cancel" class="icon-btn">×</button></div><label>Maç adı<input id="mName" required></label><label>Tarih<input id="mDate" type="date" required></label><div class="modal-actions"><span></span><button value="cancel" class="btn ghost">Vazgeç</button><button type="submit" class="btn primary">Kaydet ve aç</button></div></form>
+  </dialog>
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
