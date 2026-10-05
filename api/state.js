@@ -22,7 +22,9 @@ async function readRecord() {
   const text = await new Response(result.stream).text();
   const record = JSON.parse(text);
   if (!validState(record.state) || !Number.isFinite(record.version)) return null;
-  return { ...record, etag: result.blob.etag };
+  // Blob content reads currently expose a weak ETag (W/"…"), while
+  // conditional writes require the equivalent strong ETag ("…").
+  return { ...record, etag: result.blob.etag.replace(/^W\//, '') };
 }
 
 export default async function handler(req, res) {
