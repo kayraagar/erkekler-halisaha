@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#07110e" />
-  <title>Kadro Arena — Halı Saha Kadro Yönetimi</title>
+  <title>ERKEKLER — Halı Saha Kadro Yönetimi</title>
   <meta name="description" content="Oyuncularını yönet, sahaya sürükle ve dengeli halı saha takımları oluştur." />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,14 +16,14 @@
   <header class="topbar">
     <button class="brand" id="homeBtn" aria-label="Kadro ekranı">
       <span class="brand-mark"><i></i><i></i><i></i></span>
-      <span><b>KADRO</b><em>ARENA</em></span>
+      <span><b>ERKEKLER</b></span>
     </button>
     <nav class="nav-tabs" aria-label="Ana menü">
       <button class="nav-tab active" data-view="squad"><span>⌁</span> Kadro</button>
       <button class="nav-tab" data-view="players"><span>♙</span> Oyuncular</button>
       <button class="nav-tab" data-view="matches"><span>◷</span> Maçlar</button>
     </nav>
-    <button class="profile-pill" aria-label="Profil"><span>KA</span><i></i></button>
+    <button class="activity-button" id="activityBtn" aria-label="İşlem geçmişini aç"><span class="activity-icon">↺</span><span class="activity-label">İşlem geçmişi</span><b id="activityCount">0</b></button>
   </header>
 
   <main>
@@ -111,6 +111,11 @@
 
   <dialog id="matchDialog" class="modal small-modal">
     <form method="dialog" id="matchForm"><div class="modal-head"><div><p class="eyebrow">MAÇ BİLGİLERİ</p><h2 id="matchModalTitle">Yeni hafta</h2></div><button value="cancel" class="icon-btn">×</button></div><label>Maç adı<input id="mName" required></label><label>Tarih<input id="mDate" type="date" required></label><div class="modal-actions"><span></span><button value="cancel" class="btn ghost">Vazgeç</button><button type="submit" class="btn primary">Kaydet ve aç</button></div></form>
+  </dialog>
+  <dialog id="activityDialog" class="activity-modal">
+    <div class="activity-head"><div><p class="eyebrow">ERKEKLER</p><h2>İşlem geçmişi</h2><small>Kadroda yapılan son değişiklikler</small></div><button class="icon-btn" id="closeActivityBtn" aria-label="Kapat">×</button></div>
+    <div class="activity-list" id="activityList"></div>
+    <div class="activity-foot"><button class="btn ghost" id="clearActivityBtn">Geçmişi temizle</button></div>
   </dialog>
   <div class="toast" id="toast"></div>
   <script src="app.js"></script>
