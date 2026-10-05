@@ -1,5 +1,7 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const STORAGE='kadro-arena-v1';
+const VERSION_STORAGE='erkekler-shared-version-v1';
+const SYNC_INTERVAL=3000;
 const statsMeta={pace:'Hız',shoot:'Şut',pass:'Pas',dribble:'Dripling',defense:'Defans',physical:'Fizik',stamina:'Stamina',reflex:'Refleks',save:'Kurtarış',positioning:'Pozisyon',distribution:'Dağıtma'};
 const fieldKeys=['pace','shoot','pass','dribble','defense','physical','stamina'];
 const keeperKeys=['reflex','save','positioning','distribution'];
@@ -23,8 +25,12 @@ function createInitial(){
   const match={id:crypto.randomUUID(),name:'Çarşamba Halı Saha',date:date.toISOString().slice(0,10),format:6,formationA:'2-2-1',formationB:'2-2-1',bench:players.slice(0,12).map(p=>p.id),out:players.slice(12).map(p=>p.id),teamA:{},teamB:{},locked:[]};
   return {players,matches:[match],activeMatchId:match.id,poolTab:'bench'};
 }
-let state; try{state=JSON.parse(localStorage.getItem(STORAGE))||createInitial()}catch{state=createInitial()}
-state.history=Array.isArray(state.history)?state.history:[];
+function normalizeState(value){
+  const next=value&&Array.isArray(value.players)&&Array.isArray(value.matches)?value:createInitial();
+  next.history=Array.isArray(next.history)?next.history:[];next.poolTab=next.poolTab||'bench';return next;
+}
+let state; try{state=normalizeState(JSON.parse(localStorage.getItem(STORAGE)))}catch{state=createInitial()}
+let cloudVersion=Number(localStorage.getItem(VERSION_STORAGE)||0),syncReady=false,syncing=false,dirty=false,localRevision=0,syncTimer=null,pollTimer=null,initRunning=false;
 let selectedPlayer=null,editingPlayer=null,pendingPhoto=null;
 const match=()=>state.matches.find(m=>m.id===state.activeMatchId)||state.matches[0];
 const player=id=>state.players.find(p=>p.id===id);
@@ -34,7 +40,32 @@ const overall=p=>{
   if(p.pos==='KL')return Math.round(s.reflex*.32+s.save*.28+s.positioning*.22+s.distribution*.18);
   return Math.round(Object.entries(weights[p.pos]).reduce((a,[k,w])=>a+s[k]*w,0));
 };
-function save(){localStorage.setItem(STORAGE,JSON.stringify(state))}
+function persistLocal(){localStorage.setItem(STORAGE,JSON.stringify(state));localStorage.setItem(VERSION_STORAGE,String(cloudVersion))}
+function save(){persistLocal();dirty=true;localRevision++;if(syncReady)scheduleSync()}
+function setSyncStatus(status,label){const el=$('#syncStatus');if(!el)return;el.dataset.state=status;el.querySelector('span').textContent=label;el.title=status==='online'?'Tüm kullanıcılarla ortak veri bağlı':status==='syncing'?'Değişiklikler kaydediliyor':status==='offline'?'Ortak veri çevrimdışı; değişiklikler bu cihazda bekliyor':'Ortak veriye bağlanıyor'}
+function renderCurrent(){renderSquad();if($('#playersView').classList.contains('active'))renderPlayers();if($('#matchesView').classList.contains('active'))renderMatches();renderHistory()}
+function applyRemote(remote,version,{conflict=false}={}){state=normalizeState(remote);cloudVersion=version;dirty=false;localRevision++;persistLocal();if($('#playerDialog').open)$('#playerDialog').close();renderCurrent();if(conflict)notify('Başka bir cihaz daha önce güncelledi. En yeni ortak veri yüklendi; işlemi tekrar yapabilirsiniz.')}
+function scheduleSync(){clearTimeout(syncTimer);syncTimer=setTimeout(pushSharedState,220)}
+async function pushSharedState(){
+  if(!syncReady||!dirty)return;if(syncing){scheduleSync();return}syncing=true;setSyncStatus('syncing','Kaydediliyor');const revision=localRevision;
+  try{const response=await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state,baseVersion:cloudVersion})});const data=await response.json();
+    if(response.status===409){applyRemote(data.state,data.version,{conflict:true});return}
+    if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);cloudVersion=data.version;if(localRevision===revision)dirty=false;persistLocal();setSyncStatus('online','Ortak veri');
+  }catch(error){console.error('Shared state sync failed',error);syncReady=false;setSyncStatus('offline','Yerel mod');if(String(error.message).includes('state_too_large'))notify('Ortak veri boyutu çok büyük. Büyük oyuncu fotoğraflarını yeniden yükleyin.');if(!initRunning)setTimeout(initSharedState,10000)}
+  finally{syncing=false;if(dirty&&syncReady)scheduleSync()}
+}
+async function pollSharedState(){
+  if(!syncReady||syncing||dirty)return;
+  try{const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const data=await response.json();if(data.state&&data.version>cloudVersion)applyRemote(data.state,data.version);setSyncStatus('online','Ortak veri')}
+  catch(error){console.error('Shared state poll failed',error);setSyncStatus('offline','Yerel mod')}
+}
+async function initSharedState(){
+  if(initRunning)return;initRunning=true;setSyncStatus('connecting','Bağlanıyor');
+  try{const response=await fetch('/api/state',{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);syncReady=true;
+    if(data.state)applyRemote(data.state,data.version);else{cloudVersion=0;dirty=true;await pushSharedState();if(!syncReady)throw new Error('initial_write_failed')}
+    clearInterval(pollTimer);pollTimer=setInterval(pollSharedState,SYNC_INTERVAL);setSyncStatus('online','Ortak veri');
+  }catch(error){console.error('Shared state unavailable',error);syncReady=false;setSyncStatus('offline','Yerel mod');setTimeout(initSharedState,10000)}finally{initRunning=false}
+}
 function logEvent(type,text,detail=''){
   state.history.unshift({id:crypto.randomUUID(),type,text,detail,time:new Date().toISOString()});state.history=state.history.slice(0,100);save();renderHistory();
 }
@@ -90,6 +121,9 @@ function switchView(name){$$('.view').forEach(v=>v.classList.remove('active'));$
 function renderPlayers(){const q=$('#playerSearch').value.toLocaleLowerCase('tr'),pos=$('#positionFilter').value,box=$('#playerGallery');box.innerHTML='';state.players.filter(p=>(p.name+' '+p.nick).toLocaleLowerCase('tr').includes(q)&&(pos==='all'||p.pos===pos)).sort((a,b)=>overall(b)-overall(a)).forEach(p=>{const tile=document.createElement('article');tile.className='player-tile';tile.append(playerCard(p));tile.insertAdjacentHTML('beforeend',`<h3>${p.name}</h3><p>${p.pos}${p.alt?' · Alternatif: '+p.alt:''}</p><button class="btn ghost">Kartı düzenle</button>`);tile.querySelector('.btn').onclick=()=>openPlayer(p.id);box.append(tile)})}
 function makeStatControl(key,value){return `<label class="stat-control"><span>${statsMeta[key]}</span><input data-stat="${key}" type="range" min="1" max="99" value="${value}"><input data-number="${key}" type="number" min="1" max="99" value="${value}"></label>`}
 function openPlayer(id=null){editingPlayer=id;const p=id?structuredClone(player(id)):{name:'',nick:'',pos:'OS',alt:'',stats:Object.fromEntries([...fieldKeys,...keeperKeys].map(k=>[k,70])),photo:avatar('Yeni Oyuncu','#779486'),photoX:50,photoY:50,photoScale:110};pendingPhoto=p.photo;$('#playerModalTitle').textContent=id?'Oyuncuyu düzenle':'Yeni oyuncu';$('#pName').value=p.name;$('#pNick').value=p.nick;$('#pPosition').value=p.pos;$('#pAlt').value=p.alt;$('#photoX').value=p.photoX||50;$('#photoY').value=p.photoY||50;$('#photoScale').value=p.photoScale||110;$('#fieldStats').innerHTML=fieldKeys.map(k=>makeStatControl(k,p.stats[k])).join('');$('#keeperStats').innerHTML=keeperKeys.map(k=>makeStatControl(k,p.stats[k])).join('');$('#deletePlayerBtn').style.visibility=id?'visible':'hidden';wireEditor();updatePreview();$('#playerDialog').showModal()}
+async function optimizePhoto(file){
+  const bitmap=await createImageBitmap(file),maxEdge=520,ratio=Math.min(1,maxEdge/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));const ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.8));if(!blob)throw new Error('image_encode_failed');return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob)})
+}
 function draftPlayer(){const stats={};[...fieldKeys,...keeperKeys].forEach(k=>stats[k]=Number($(`[data-number="${k}"]`).value));return{id:editingPlayer||'preview',name:$('#pName').value||'Yeni Oyuncu',nick:$('#pNick').value||'YENİ',pos:$('#pPosition').value,alt:$('#pAlt').value,stats,photo:pendingPhoto,photoX:Number($('#photoX').value),photoY:Number($('#photoY').value),photoScale:Number($('#photoScale').value)}}
 function wireEditor(){$$('#playerForm input,#playerForm select').forEach(el=>el.oninput=()=>{if(el.dataset.stat){$(`[data-number="${el.dataset.stat}"]`).value=el.value}if(el.dataset.number){el.value=Math.max(1,Math.min(99,Number(el.value)||1));$(`[data-stat="${el.dataset.number}"]`).value=el.value}updatePreview()})}
 function updatePreview(){const p=draftPlayer();$('#cardPreview').innerHTML='';$('#cardPreview').append(playerCard(p));$('#liveOverall').textContent=overall(p);$('#keeperBlock').style.display=p.pos==='KL'?'block':'none';$('#formulaText').textContent=p.pos==='KL'?'%32 refleks · %28 kurtarış · %22 pozisyon · %18 dağıtma':p.pos==='DF'?'Defans %30 · fizik %22 · hız %13 ağırlıklı':p.pos==='OS'?'Pas %27 · stamina %20 · dripling %16 ağırlıklı':'Şut %30 · hız %20 · dripling %15 ağırlıklı'}
@@ -101,9 +135,9 @@ function cloneMatch(src){const c=structuredClone(src);c.id=crypto.randomUUID();c
 $$('.nav-tab').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#homeBtn').onclick=()=>switchView('squad');$('#balanceBtn').onclick=balanceTeams;$('#formatSelect').onchange=e=>changeFormat(e.target.value);for(const t of ['A','B'])$(`#formation${t}`).onchange=e=>{const m=match(),old=m[`formation${t}`];remapTeam(t,e.target.value);m[`formation${t}`]=e.target.value;logEvent('formation',`Takım ${t} dizilişi değiştirildi`,`${old} → ${e.target.value}`);renderSquad()};
 $('#poolTabs').onclick=e=>{const b=e.target.closest('button');if(b){state.poolTab=b.dataset.pool;save();renderPool()}};wireDrop($('#poolDrop'),id=>moveToZone(id,$('#poolDrop').dataset.zone));$('#poolDrop').addEventListener('click',e=>{if(!e.target.closest('.mini-card')&&selectedPlayer){moveToZone(selectedPlayer,$('#poolDrop').dataset.zone);selectedPlayer=null}});
 $('#addPlayerBtn').onclick=()=>openPlayer();$('#playerSearch').oninput=renderPlayers;$('#positionFilter').onchange=renderPlayers;$('#newMatchBtn').onclick=()=>openMatchDialog(true);$('#newMatchBtn2').onclick=()=>openMatchDialog(true);$('#editMatchBtn').onclick=()=>openMatchDialog(false);
-$('#photoInput').onchange=e=>{const f=e.target.files[0];if(!f)return;if(f.size>2.5*1024*1024){notify('Fotoğraf 2,5 MB’dan küçük olmalı.');return}const r=new FileReader();r.onload=()=>{pendingPhoto=r.result;updatePreview()};r.readAsDataURL(f)};
+$('#photoInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;if(f.size>8*1024*1024){notify('Fotoğraf 8 MB’dan küçük olmalı.');return}try{pendingPhoto=await optimizePhoto(f);updatePreview();notify('Fotoğraf ortak kayıt için optimize edildi.')}catch(error){console.error(error);notify('Fotoğraf işlenemedi. JPG veya PNG deneyin.')}};
 $('#playerForm').addEventListener('submit',e=>{e.preventDefault();const p=draftPlayer();if(!$('#pName').value.trim()||!$('#pNick').value.trim())return; if(editingPlayer){const before=overall(player(editingPlayer));Object.assign(player(editingPlayer),p,{id:editingPlayer});logEvent('player',`${p.nick} oyuncu kartı güncellendi`,`${p.pos} · Overall ${before} → ${overall(p)}`)}else{p.id=crypto.randomUUID();state.players.push(p);state.matches.forEach(m=>m.out.push(p.id));logEvent('player',`${p.nick} oyuncu listesine eklendi`,`${p.name} · ${p.pos} · ${overall(p)} overall`)}$('#playerDialog').close();renderPlayers();renderSquad();notify(editingPlayer?'Oyuncu kartı güncellendi.':'Yeni oyuncu kadro dışına eklendi.')});$('#deletePlayerBtn').onclick=deletePlayer;
 $('#matchForm').addEventListener('submit',e=>{e.preventDefault();if(e.submitter?.value==='cancel')return;const isNew=e.currentTarget.dataset.new==='1';if(isNew){const m={id:crypto.randomUUID(),name:$('#mName').value,date:$('#mDate').value,format:6,formationA:'2-2-1',formationB:'2-2-1',bench:state.players.map(p=>p.id),out:[],teamA:{},teamB:{},locked:[]};state.matches.push(m);state.activeMatchId=m.id;logEvent('match','Yeni maç oluşturuldu',`${m.name} · ${formatDate(m.date)}`)}else{const old=match().name;match().name=$('#mName').value;match().date=$('#mDate').value;logEvent('match','Maç bilgileri güncellendi',`${old} → ${match().name}`)}$('#matchDialog').close();switchView('squad');renderSquad();notify('Maç kaydedildi.')});
 $('#activityBtn').onclick=()=>{renderHistory();$('#activityDialog').showModal()};$('#closeActivityBtn').onclick=()=>$('#activityDialog').close();$('#activityDialog').addEventListener('click',e=>{if(e.target===$('#activityDialog'))$('#activityDialog').close()});$('#clearActivityBtn').onclick=()=>{if(confirm('İşlem geçmişi temizlensin mi?')){state.history=[];save();renderHistory();notify('İşlem geçmişi temizlendi.')}};
 document.addEventListener('keydown',e=>{if(e.key==='Escape')selectedPlayer=null});
-renderSquad();renderHistory();
+renderSquad();renderHistory();initSharedState();
