@@ -15,7 +15,9 @@ function validState(state) {
 }
 
 async function readRecord() {
-  const result = await get(STATE_PATH, { access: 'private' });
+  // Shared application state must never be read through Blob's CDN cache.
+  // A cached ETag/version makes the next legitimate write look like a conflict.
+  const result = await get(STATE_PATH, { access: 'private', useCache: false });
   if (!result || result.statusCode !== 200 || !result.stream) return null;
   const text = await new Response(result.stream).text();
   const record = JSON.parse(text);
