@@ -1,6 +1,5 @@
-import { BlobPreconditionFailedError, get, put } from '@vercel/blob';
+import { neon } from '@neondatabase/serverless';
 
-const STATE_PATH = 'erkekler/shared-state.json';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 function send(res, status, body) {
@@ -8,83 +7,93 @@ function send(res, status, body) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   return res.status(status).json(body);
 }
-
 function validState(state) {
   return state && typeof state === 'object' && Array.isArray(state.players) &&
     Array.isArray(state.matches) && typeof state.activeMatchId === 'string';
 }
 
-async function readRecord() {
-  // Shared application state must never be read through Blob's CDN cache.
-  // A cached ETag/version makes the next legitimate write look like a conflict.
-  const result = await get(STATE_PATH, { access: 'private', useCache: false });
-  if (!result || result.statusCode !== 200 || !result.stream) return null;
-  const text = await new Response(result.stream).text();
-  const record = JSON.parse(text);
-  if (!validState(record.state) || !Number.isFinite(record.version)) return null;
-  // Blob content reads currently expose a weak ETag (W/"…"), while
-  // conditional writes require the equivalent strong ETag ("…").
-  return { ...record, etag: result.blob.etag.replace(/^W\//, '') };
+async function ensureTable(sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS erkekler_shared_state (
+      id SMALLINT PRIMARY KEY CHECK (id = 1),
+      state JSONB NOT NULL,
+      version BIGINT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+}
+
+async function readRecord(sql) {
+  const rows = await sql`
+    SELECT state, version
+    FROM erkekler_shared_state
+    WHERE id = 1
+  `;
+  if (!rows.length) return null;
+  const record = rows[0];
+  const version = Number(record.version);
+  if (!validState(record.state) || !Number.isFinite(version)) return null;
+  return { state: record.state, version };
 }
 
 export default async function handler(req, res) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return send(res, 503, { error: 'storage_not_configured' });
+  if (!process.env.DATABASE_URL) {
+    return send(res, 503, { error: 'database_not_configured' });
   }
 
-  if (req.method === 'GET') {
-    try {
-      const record = await readRecord();
-      return send(res, 200, record
-        ? { state: record.state, version: record.version }
-        : { state: null, version: 0 });
-    } catch (error) {
-      console.error('Shared state read failed', error);
-      return send(res, 500, { error: 'state_read_failed' });
-    }
-  }
+  const sql = neon(process.env.DATABASE_URL);
 
-  if (req.method === 'PUT') {
-    const rawSize = Number(req.headers['content-length'] || 0);
-    if (rawSize > MAX_BODY_BYTES) return send(res, 413, { error: 'state_too_large' });
-    const { state, baseVersion } = req.body || {};
-    if (!validState(state) || !Number.isFinite(baseVersion)) {
-      return send(res, 400, { error: 'invalid_state' });
+  try {
+    await ensureTable(sql);
+
+    if (req.method === 'GET') {
+      const record = await readRecord(sql);
+      return send(res, 200, record || { state: null, version: 0 });
     }
 
-    try {
-      const current = await readRecord();
-      const currentVersion = current?.version || 0;
-      if (baseVersion !== currentVersion) {
-        return send(res, 409, { state: current?.state || null, version: currentVersion });
+    if (req.method === 'PUT') {
+      const rawSize = Number(req.headers['content-length'] || 0);
+      if (rawSize > MAX_BODY_BYTES) return send(res, 413, { error: 'state_too_large' });
+
+      const { state, baseVersion } = req.body || {};
+      if (!validState(state) || !Number.isFinite(baseVersion)) {
+        return send(res, 400, { error: 'invalid_state' });
       }
-
-      const version = Math.max(Date.now(), currentVersion + 1);
-      const body = JSON.stringify({ state, version });
-      if (Buffer.byteLength(body) > MAX_BODY_BYTES) {
+      if (Buffer.byteLength(JSON.stringify(state)) > MAX_BODY_BYTES) {
         return send(res, 413, { error: 'state_too_large' });
       }
 
-      const options = {
-        access: 'private',
-        allowOverwrite: true,
-        addRandomSuffix: false,
-        contentType: 'application/json',
-        cacheControlMaxAge: 60,
-      };
-      if (current?.etag) options.ifMatch = current.etag;
-      await put(STATE_PATH, body, options);
-      return send(res, 200, { version });
-    } catch (error) {
-      if (error instanceof BlobPreconditionFailedError) {
-        const latest = await readRecord();
-        return send(res, 409, { state: latest?.state || null, version: latest?.version || 0 });
+      const version = Math.max(Date.now(), baseVersion + 1);
+      let rows;
+      if (baseVersion === 0) {
+        rows = await sql`
+          INSERT INTO erkekler_shared_state (id, state, version, updated_at)
+          VALUES (1, ${JSON.stringify(state)}::jsonb, ${version}, NOW())
+          ON CONFLICT (id) DO NOTHING
+          RETURNING version
+        `;
+      } else {
+        rows = await sql`
+          UPDATE erkekler_shared_state
+          SET state = ${JSON.stringify(state)}::jsonb,
+              version = ${version},
+              updated_at = NOW()
+          WHERE id = 1 AND version = ${baseVersion}
+          RETURNING version
+        `;
       }
-      console.error('Shared state write failed', error);
-      return send(res, 500, { error: 'state_write_failed' });
-    }
-  }
 
-  res.setHeader('Allow', 'GET, PUT');
-  return send(res, 405, { error: 'method_not_allowed' });
+      if (!rows.length) {
+        const current = await readRecord(sql);
+        return send(res, 409, current || { state: null, version: 0 });
+      }
+      return send(res, 200, { version: Number(rows[0].version) });
+    }
+
+    res.setHeader('Allow', 'GET, PUT');
+    return send(res, 405, { error: 'method_not_allowed' });
+  } catch (error) {
+    console.error('Shared state database failed', error);
+    return send(res, 500, { error: 'database_failed' });
+  }
 }

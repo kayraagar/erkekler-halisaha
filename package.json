@@ -7,6 +7,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@vercel/blob": "^2.3.0"
+    "@neondatabase/serverless": "^1.2.0"
   }
 }

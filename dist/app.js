@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const STORAGE='kadro-arena-v1';
 const VERSION_STORAGE='erkekler-shared-version-v1';
-const SYNC_INTERVAL=3000;
+const SYNC_INTERVAL=5000;
 const statsMeta={pace:'Hız',shoot:'Şut',pass:'Pas',dribble:'Dripling',defense:'Defans',physical:'Fizik',stamina:'Stamina',reflex:'Refleks',save:'Kurtarış',positioning:'Pozisyon',distribution:'Dağıtma'};
 const fieldKeys=['pace','shoot','pass','dribble','defense','physical','stamina'];
 const keeperKeys=['reflex','save','positioning','distribution'];
@@ -51,7 +51,7 @@ async function pushSharedState(){
   finally{syncing=false;if(dirty&&syncReady)scheduleSync()}
 }
 async function pollSharedState(){
-  if(!syncReady||syncing||dirty)return;
+  if(document.hidden||!syncReady||syncing||dirty)return;
   try{const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const data=await response.json();if(data.state&&data.version>cloudVersion)applyRemote(data.state,data.version);setSyncStatus('online','Ortak veri')}
   catch(error){console.error('Shared state poll failed',error);setSyncStatus('offline','Yerel mod')}
 }
@@ -136,4 +136,6 @@ $('#playerForm').addEventListener('submit',e=>{e.preventDefault();const p=draftP
 $('#matchForm').addEventListener('submit',e=>{e.preventDefault();if(e.submitter?.value==='cancel')return;const isNew=e.currentTarget.dataset.new==='1';if(isNew){const m={id:crypto.randomUUID(),name:$('#mName').value,date:$('#mDate').value,format:6,formationA:'2-2-1',formationB:'2-2-1',bench:state.players.map(p=>p.id),out:[],teamA:{},teamB:{},locked:[]};state.matches.push(m);state.activeMatchId=m.id;logEvent('match','Yeni maç oluşturuldu',`${m.name} · ${formatDate(m.date)}`)}else{const old=match().name;match().name=$('#mName').value;match().date=$('#mDate').value;logEvent('match','Maç bilgileri güncellendi',`${old} → ${match().name}`)}$('#matchDialog').close();switchView('squad');renderSquad();notify('Maç kaydedildi.')});
 $('#activityBtn').onclick=()=>{renderHistory();$('#activityDialog').showModal()};$('#closeActivityBtn').onclick=()=>$('#activityDialog').close();$('#activityDialog').addEventListener('click',e=>{if(e.target===$('#activityDialog'))$('#activityDialog').close()});$('#clearActivityBtn').onclick=()=>{if(confirm('İşlem geçmişi temizlensin mi?')){state.history=[];save();renderHistory();notify('İşlem geçmişi temizlendi.')}};
 document.addEventListener('keydown',e=>{if(e.key==='Escape')selectedPlayer=null});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollSharedState()});
+window.addEventListener('focus',pollSharedState);
 renderSquad();renderHistory();initSharedState();
